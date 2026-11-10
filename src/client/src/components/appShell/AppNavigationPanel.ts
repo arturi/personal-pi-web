@@ -12,6 +12,8 @@ import "../MachineSwitcher";
 import "../ProjectList";
 import "../WorkspaceList";
 import "../SessionList";
+import "../personalOs/ProjectSessionNavigation";
+import type { ProjectSessionGroup } from "../../personalOs/projectSessionCatalog";
 
 export type NavigationFocusTarget = NavigationSection | "chat";
 
@@ -34,6 +36,9 @@ export class AppNavigationPanel extends LitElement {
   @property({ attribute: false }) deletingWorkspaceIds: string[] = [];
   @property({ attribute: false }) workspaceLabelItems: (workspace: Workspace) => WorkspaceLabelItem[] = () => [];
   @property({ attribute: false }) refreshControl: unknown;
+  @property({ attribute: false }) projectSessionGroups: ProjectSessionGroup[] = [];
+  @property({ attribute: false }) projectSessionUnreadIds: ReadonlySet<string> = new Set();
+  @property({ type: Boolean }) projectSessionsLoading = false;
   @property({ type: Boolean, reflect: true }) collapsible = false;
   @property({ type: Boolean, reflect: true }) compact = false;
   @property({ type: Boolean }) machinesCollapsed = false;
@@ -43,6 +48,10 @@ export class AppNavigationPanel extends LitElement {
   @property({ type: Number }) startingSessionCount = 0;
   @property({ type: Boolean }) canStartSession = false;
   @property({ attribute: false }) onShowActions?: () => void;
+  @property({ attribute: false }) onSelectPrimaryProject?: (project: Project) => void | Promise<void>;
+  @property({ attribute: false }) onSelectPrimarySession?: (workspace: Workspace, session: SessionInfo) => void | Promise<void>;
+  @property({ attribute: false }) onStartPrimarySession?: (workspace: Workspace) => void | Promise<void>;
+  @property({ attribute: false }) onAddProject?: () => void | Promise<void>;
   @property({ attribute: false }) onToggleMachines?: () => void;
   @property({ attribute: false }) onToggleProjects?: () => void;
   @property({ attribute: false }) onToggleWorkspaces?: () => void;
@@ -76,8 +85,10 @@ export class AppNavigationPanel extends LitElement {
   @query("project-list") private projectList?: KeyboardNavigableSection;
   @query("workspace-list") private workspaceList?: KeyboardNavigableSection;
   @query("session-list") private sessionList?: KeyboardNavigableSection;
+  @query("details.runtime-browser") private runtimeBrowser?: HTMLDetailsElement;
 
   async focusSection(section: NavigationSection): Promise<boolean> {
+    this.openRuntimeBrowser();
     await this.updateComplete;
     switch (section) {
       case "machines": return await this.focusNavigableSection(this.compact ? this.machineList : this.machineSwitcher);
@@ -89,8 +100,27 @@ export class AppNavigationPanel extends LitElement {
 
   override render() {
     return html`
-      <header>
-        <strong>PI WEB</strong>
+      <project-session-navigation
+        .projects=${this.projects}
+        .selectedProject=${this.selectedProject}
+        .groups=${this.projectSessionGroups}
+        .selectedWorkspace=${this.selectedWorkspace}
+        .selectedSession=${this.selectedSession}
+        .statuses=${this.sessionStatuses}
+        .activities=${this.sessionActivities}
+        .sendingPrompts=${this.sendingPrompts}
+        .unreadSessionIds=${this.projectSessionUnreadIds}
+        .loading=${this.projectSessionsLoading}
+        .refreshControl=${this.refreshControl}
+        .onSelectProject=${this.onSelectPrimaryProject ?? this.onSelectProject}
+        .onSelectSession=${this.onSelectPrimarySession}
+        .onStartSession=${this.onStartPrimarySession}
+        .onAddProject=${this.onAddProject}
+        .onBrowseRuntime=${() => { this.toggleRuntimeBrowser(); }}
+        .onShowActions=${this.onShowActions}
+      ></project-session-navigation>
+      <header class="legacy-header hidden">
+        <strong>AGENT CONSOLE</strong>
         ${shouldShowMachinesSection(this.machines) ? html`
           <machine-switcher
             .machines=${this.machines}
@@ -108,6 +138,9 @@ export class AppNavigationPanel extends LitElement {
           <button title="Show Actions" aria-label="Show Actions" @click=${() => { this.onShowActions?.(); }}>Actions</button>
         </div>
       </header>
+      <details class="runtime-browser">
+        <summary aria-label="Close runtime browser"></summary>
+        <div class="runtime-sections">
       ${this.compact && shouldShowMachinesSection(this.machines) ? html`
         <machine-list
           .machines=${this.machines}
@@ -182,7 +215,17 @@ export class AppNavigationPanel extends LitElement {
         .onFocusNextSection=${() => { this.focusNextFrom("sessions"); }}
         .onCancelKeyboardNavigation=${() => { this.cancelKeyboardNavigation(); }}
       ></session-list>
+        </div>
+      </details>
     `;
+  }
+
+  private openRuntimeBrowser(): void {
+    if (this.runtimeBrowser !== undefined) this.runtimeBrowser.open = true;
+  }
+
+  private toggleRuntimeBrowser(): void {
+    if (this.runtimeBrowser !== undefined) this.runtimeBrowser.open = !this.runtimeBrowser.open;
   }
 
   /**
@@ -217,19 +260,27 @@ export class AppNavigationPanel extends LitElement {
   static override styles = css`
     :host { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
     :host([compact]) { flex: 1 1 auto; }
-    header { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px; border-bottom: 1px solid var(--pi-border); }
-    header strong { flex: 0 0 auto; }
+    project-session-navigation { flex: 1 1 auto; min-height: 180px; }
+    .legacy-header { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px; border-bottom: 1px solid var(--pi-border); }
+    .legacy-header.hidden { display: none; }
+    .legacy-header strong { flex: 0 0 auto; }
     machine-switcher { flex: 1 1 auto; min-width: 0; }
-    :host([compact]) header { display: none; }
+    :host([compact]) .legacy-header { display: none; }
     .header-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
-    /* Expanded sections share the panel height equally, so collapsing one
-       section distributes its space to every remaining section, not just the
-       session list. Collapsed sections keep only their heading height. */
-    machine-list, project-list, workspace-list, session-list { flex: 1 1 0px; min-height: 0; overflow: hidden; border-bottom: 1px solid var(--pi-border-muted); }
-    machine-list[collapsed],
-    project-list[collapsed],
-    workspace-list[collapsed],
-    session-list[collapsed] { flex: 0 0 auto; min-height: auto; overflow: hidden; }
+    .runtime-browser { display: none; flex: 0 0 auto; min-height: 0; border-top: 1px solid var(--pi-border); background: var(--pi-bg); }
+    .runtime-browser[open] { flex: 1 1 50%; display: flex; flex-direction: column; }
+    .runtime-browser > summary { display: none; }
+    .runtime-sections { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+    /* Expanded sections share the runtime browser height equally, so
+       collapsing one distributes its space to the remaining sections. */
+    .runtime-sections machine-list,
+    .runtime-sections project-list,
+    .runtime-sections workspace-list,
+    .runtime-sections session-list { flex: 1 1 0px; min-height: 0; overflow: hidden; border-bottom: 1px solid var(--pi-border-muted); }
+    .runtime-sections machine-list[collapsed],
+    .runtime-sections project-list[collapsed],
+    .runtime-sections workspace-list[collapsed],
+    .runtime-sections session-list[collapsed] { flex: 0 0 auto; min-height: auto; overflow: hidden; }
     button { border: 1px solid var(--pi-border); border-radius: 8px; background: var(--pi-surface); color: var(--pi-text); padding: 7px 9px; cursor: pointer; }
   `;
 }

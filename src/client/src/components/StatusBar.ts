@@ -1,8 +1,15 @@
 import { LitElement, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import type { SessionStatus } from "../api";
-import { formatCost, formatTokenCount } from "../utils/format";
+import { thinkingLevelLabel } from "../../../shared/thinkingLevels";
+import { formatTokenCount } from "../utils/format";
 import { renderSessionWarningIcon, statusBarStyles } from "./shared";
+
+export function statusBarContextLimit(context: SessionStatus["contextUsage"]): string | undefined {
+  if (context === undefined) return undefined;
+  if (context.percent === null) return `context ${formatTokenCount(context.contextWindow)}`;
+  return `context ${context.percent.toFixed(1)}% / ${formatTokenCount(context.contextWindow)}`;
+}
 
 export interface StatusBarWarningControlContent {
   countText: string;
@@ -24,6 +31,8 @@ export class StatusBar extends LitElement {
   @property({ type: Number }) warningCount = 0;
   @property({ type: Boolean }) warningsExpanded = false;
   @property({ attribute: false }) onToggleWarnings?: () => void;
+  @property({ attribute: false }) onSelectModel?: () => void;
+  @property({ attribute: false }) onSelectThinking?: () => void;
 
   private readonly handleToggleWarnings = (): void => {
     this.onToggleWarnings?.();
@@ -32,13 +41,9 @@ export class StatusBar extends LitElement {
   override render() {
     const status = this.status;
     if (status === undefined) return html`<div class="bar muted">No session status yet</div>`;
-    const context = status.contextUsage;
-    const contextText = context
-      ? context.percent == null
-        ? `context ${formatTokenCount(context.contextWindow)}`
-        : `${context.percent.toFixed(1)}%/${formatTokenCount(context.contextWindow)}`
-      : "context unknown";
-    const tokens = status.tokens;
+    const model = status.model?.id ?? "no model";
+    const thinking = thinkingLevelLabel(status.thinkingLevel);
+    const contextLimit = statusBarContextLimit(status.contextUsage);
     const warningControl = statusBarWarningControlContent(this.warningCount, this.warningsExpanded);
     return html`
       <div class="bar">
@@ -55,10 +60,9 @@ export class StatusBar extends LitElement {
             <span>${warningControl.countText}</span>
           </button>
         `}
-        <span>↑${formatTokenCount(tokens.input)}</span>
-        <span>↓${formatTokenCount(tokens.output)}</span>
-        <span class="context">${contextText}</span>
-        <span>${formatCost(status.cost)}</span>
+        <button type="button" class="status-control model-control" title="Select model" aria-label=${`Current model: ${model}. Select model`} @click=${() => this.onSelectModel?.()}>${model}</button>
+        <button type="button" class="status-control reasoning-control" title=${`Select thinking level: ${thinking}`} aria-label=${`Current thinking level: ${thinking}. Select thinking level`} @click=${() => this.onSelectThinking?.()}>${thinking}</button>
+        ${contextLimit === undefined ? null : html`<span class="usage-limit">${contextLimit}</span>`}
         ${status.pendingMessageCount > 0 ? html`<span>${String(status.pendingMessageCount)} queued</span>` : null}
       </div>
     `;

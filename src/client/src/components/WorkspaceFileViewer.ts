@@ -304,7 +304,7 @@ export class WorkspaceFileViewer extends LitElement {
   static override styles = [
     formattedTextStyles,
     css`
-      :host { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: auto; color: var(--pi-text); font: 14px system-ui, sans-serif; }
+      :host { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: auto; color: var(--pi-text); font: 14px var(--pi-font-family, system-ui, sans-serif); }
       .viewer-header { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px; border-bottom: 1px solid var(--pi-border-muted); background: var(--pi-bg); }
       .viewer-header strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .viewer-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }

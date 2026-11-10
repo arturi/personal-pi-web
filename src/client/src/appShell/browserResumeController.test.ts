@@ -132,4 +132,5 @@ describe("BrowserResumeController", () => {
     await secondCompleted.promise;
     controller.disconnect();
   });
+
 });

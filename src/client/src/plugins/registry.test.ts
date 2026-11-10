@@ -1071,6 +1071,7 @@ function testThemeTokens(): ThemeTokens {
     "--pi-dim": "#000000",
     "--pi-accent": "#000000",
     "--pi-accent-border": "#000000",
+    "--pi-info": "#000000",
     "--pi-selection-bg": "#000000",
     "--pi-success": "#000000",
     "--pi-success-border": "#000000",

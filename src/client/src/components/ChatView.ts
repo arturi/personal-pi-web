@@ -6,7 +6,7 @@ import { groupChatMessages, summarizeChatGroup, type ChatGroup } from "../chatGr
 import { writeClipboardText } from "../clipboard";
 import { capturePrependScrollAnchor, PREPEND_RESTORE_SETTLE_FRAMES, restorePrependScrollAnchor, type PrependScrollAnchor } from "../chatScrollAnchoring";
 import { shouldRequestEarlierMessages } from "../chatHistoryLoading";
-import { ChatScrollController, distanceFromScrollBottom, findFirstVisibleArticle, isNearScrollBottom, type ChatAnchorScrollPosition, type ChatScrollRestoreResult } from "../chatScrollPosition";
+import { ChatScrollController, distanceFromScrollBottom, isNearScrollBottom, type ChatAnchorScrollPosition, type ChatScrollRestoreResult } from "../chatScrollPosition";
 import type { AskUserSubmission, PendingAskUser, PendingExtensionDialog, QueuedSessionMessage, SessionActivity, SessionStatus, SessionWarningSeverity } from "../api";
 import type { ClosedExtensionDialog } from "../appState";
 import {
@@ -31,7 +31,6 @@ import "./AskUserCard";
 import "./ExtensionDialogCard";
 import type { ExtensionDialogAnswerCallback, ExtensionDialogCancelCallback, ExtensionDialogDismissCallback } from "./ExtensionDialogCard";
 import { registerRenderedModal, type RenderedModalRegistration } from "./modalLayerRegistry";
-import "./ConversationMeter";
 import "./FormattedText";
 import "./ToolExecutionView";
 
@@ -61,15 +60,6 @@ function isSessionNotificationTarget(value: unknown): value is SessionNotificati
     && typeof Reflect.get(value, "machineId") === "string"
     && typeof Reflect.get(value, "cwd") === "string"
     && typeof Reflect.get(value, "sessionId") === "string";
-}
-
-function clampPercent(value: number): number {
-  return clampNumber(value, 0, 100);
-}
-
-function clampNumber(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) return min;
-  return Math.min(max, Math.max(min, value));
 }
 
 interface PendingNotificationFocus {
@@ -124,13 +114,89 @@ export function chatGroupScrollMarkerId(endIndex: number): string {
 }
 
 /** The CSS class list for an event-group `<details>`, distinguishing the live tail. */
-export function chatMessageGroupClassName(defaultOpen: boolean): string {
-  return defaultOpen ? "msg event-group live" : "msg event-group";
+export function chatMessageGroupClassName(defaultOpen: boolean, hasThought = false): string {
+  return ["msg", "event-group", ...(defaultOpen ? ["live"] : []), ...(hasThought ? ["thought-group"] : [])].join(" ");
 }
 
 /** The disclosure summary label for an event group, distinguishing the live tail. */
 export function chatMessageGroupLabel(defaultOpen: boolean): string {
   return defaultOpen ? "live events" : "events";
+}
+
+export function chatThoughtTitle(messages: readonly ChatLine[]): string | undefined {
+  for (const message of messages) {
+    for (const part of message.parts) {
+      if (part.type !== "thinking") continue;
+      const firstLine = part.text.split(/\r?\n/u).find((line) => line.trim() !== "") ?? "";
+      const text = plainThoughtTitle(firstLine);
+      if (text === "") return "Working";
+      const sentence = /^.*?[.!?](?:\s|$)/u.exec(text)?.[0]?.trim() ?? text;
+      return sentence.length <= 72 ? sentence : `${sentence.slice(0, 69).trimEnd()}…`;
+    }
+  }
+  return undefined;
+}
+
+function plainThoughtTitle(line: string): string {
+  return line
+    .replace(/^\s{0,3}(?:#{1,6}\s+|>\s+|[-+*]\s+|\d+[.)]\s+)/u, "")
+    .replace(/!\[([^\]]*)\]\([^)]*\)/gu, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/gu, "$1")
+    .replace(/`([^`]+)`/gu, "$1")
+    .replace(/(\*\*|__|~~)(.*?)\1/gu, "$2")
+    .replace(/[*_~]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export interface ChatActivityKinds {
+  hasReasoning: boolean;
+  hasTools: boolean;
+}
+
+export interface ChatLiveActivityProjection {
+  messages: ChatLine[];
+  startIndex: number;
+  hiddenCount: number;
+}
+
+export function chatLiveActivityProjection(messages: readonly ChatLine[], startIndex: number, expanded: boolean, visibleActionCount = 2): ChatLiveActivityProjection {
+  const visibleCount = expanded ? messages.length : Math.min(messages.length, Math.max(1, visibleActionCount));
+  const hiddenCount = messages.length - visibleCount;
+  return {
+    messages: messages.slice(hiddenCount),
+    startIndex: startIndex + hiddenCount,
+    hiddenCount,
+  };
+}
+
+export function chatActivityKinds(messages: readonly ChatLine[]): ChatActivityKinds {
+  let hasReasoning = false;
+  let hasTools = false;
+  for (const message of messages) {
+    if (message.role === "tool") hasTools = true;
+    for (const part of message.parts) {
+      if (part.type === "thinking") hasReasoning = true;
+      if (part.type === "toolCall" || part.type === "toolExecution" || part.type === "toolResult") hasTools = true;
+    }
+  }
+  return { hasReasoning, hasTools };
+}
+
+export interface ChatRolePresentation {
+  glyph: string;
+  label: string;
+}
+
+export function chatRolePresentation(role: ChatLine["role"], projectIcon = "◆"): ChatRolePresentation {
+  switch (role) {
+    case "user": return { glyph: "›", label: "You" };
+    case "assistant": return { glyph: projectIcon, label: "Assistant" };
+    case "tool": return { glyph: "⌘", label: "Tool" };
+    case "system": return { glyph: "i", label: "System" };
+    case "bash": return { glyph: "$", label: "Shell" };
+    case "skill": return { glyph: "◇", label: "Skill" };
+  }
 }
 
 /** Whether a queued-message section shows the server clear-queue action. */
@@ -186,6 +252,7 @@ function chatMessageModelLabel(message: ChatLine): string | undefined {
 export class ChatView extends LitElement {
   @property({ attribute: false }) messages: ChatLine[] = [];
   @property() sessionId = "";
+  @property() projectIcon = "◆";
   @property({ type: Number }) messageStart = 0;
   @property({ type: Number }) messageEnd = 0;
   @property({ type: Number }) messageTotal = 0;
@@ -219,7 +286,7 @@ export class ChatView extends LitElement {
   @state() private zoomedImage: { src: string; alt: string } | undefined = undefined;
   @state() private expandedMetaKey: string | undefined;
   @state() private copiedMessageKey: string | undefined;
-  @state() private currentConversationIndex: number | undefined;
+  @state() private expandedLiveGroupStartIndex: number | undefined;
   @state() private collapsedNotificationTargetKeys: ReadonlySet<string> = new Set();
   @state() private retainedEmptyNotificationTrayTargetKey: string | undefined;
   private pendingNotificationFocus: PendingNotificationFocus | undefined;
@@ -232,7 +299,6 @@ export class ChatView extends LitElement {
   private scrollToBottomFrame: number | undefined;
   private scrollToOpenAskFrame: number | undefined;
   private scrollToOpenDialogFrame: number | undefined;
-  private conversationRailFrame: number | undefined;
   private groupedMessagesInput?: ChatLine[];
   private groupedMessagesStart = 0;
   private groupedMessagesCache: ChatGroup[] = [];
@@ -299,7 +365,6 @@ export class ChatView extends LitElement {
       cancelAnimationFrame(this.scrollToOpenDialogFrame);
       this.scrollToOpenDialogFrame = undefined;
     }
-    if (this.conversationRailFrame !== undefined) cancelAnimationFrame(this.conversationRailFrame);
     window.removeEventListener("resize", this.onViewportResize);
     window.removeEventListener("pagehide", this.onPageHide);
     window.visualViewport?.removeEventListener("resize", this.onViewportResize);
@@ -315,6 +380,7 @@ export class ChatView extends LitElement {
     this.disclosures.syncSession(this.sessionId);
     this.pendingNotificationFocus = undefined;
     this.retainedEmptyNotificationTrayTargetKey = undefined;
+    this.expandedLiveGroupStartIndex = undefined;
     this.scrollController.clearScheduledSave();
     this.suppressScrollSave = false;
     this.suppressLoadMoreRequests = false;
@@ -363,7 +429,6 @@ export class ChatView extends LitElement {
     if (!changed.has("sessionId") && openedAsk && this.pinnedToBottom) this.scrollToOpenAsk();
     else if (!changed.has("sessionId") && openedDialog && this.pinnedToBottom) this.scrollToOpenDialog();
     else if (!changed.has("sessionId") && (changed.has("messages") || changed.has("pendingAsk") || changed.has("pendingDialogs") || changed.has("closedDialogs")) && this.pinnedToBottom) this.scrollToBottom();
-    if (changed.has("messages") || changed.has("messageStart") || changed.has("messageTotal") || changed.has("hasMore") || changed.has("loadingMore")) this.scheduleConversationRailUpdate();
     if (changed.has("messages") || changed.has("messageStart") || changed.has("hasMore") || changed.has("loadingMore") || changed.has("pendingAsk") || changed.has("pendingDialogs") || changed.has("closedDialogs")) this.continuePendingScrollRestore();
     if (changed.has("messages") || changed.has("hasMore") || changed.has("loadingMore")) this.requestLoadMoreIfNeeded();
     if (changed.has("notificationInbox") && this.pendingNotificationFocus !== undefined) this.focusPendingNotificationTarget();
@@ -417,7 +482,6 @@ export class ChatView extends LitElement {
       ${this.renderTopNotices()}
       ${this.renderNotificationLiveRegions()}
       <div class="chat-wrap">
-        ${this.renderConversationRail()}
         <div class="chat" @scroll=${() => { this.onScroll(); }} @wheel=${(event: WheelEvent) => { this.onWheel(event); }} @touchstart=${(event: TouchEvent) => { this.onTouchStart(event); }} @touchmove=${(event: TouchEvent) => { this.onTouchMove(event); }}>
           ${this.renderHistoryBoundary()}
           ${repeat(
@@ -778,26 +842,6 @@ export class ChatView extends LitElement {
     return activity.detail !== undefined && activity.detail !== "" ? `${activity.label}: ${activity.detail}` : activity.label;
   }
 
-  private renderConversationRail() {
-    if (!this.messages.length || this.messageTotal <= 0) return null;
-    const total = this.conversationDisplayTotal();
-    const position = this.conversationPositionPercent(total);
-    const loadedPercent = this.hasMore ? clampPercent((this.messages.length / total) * 100) : 100;
-    return html`<conversation-meter .positionPercent=${position} .loadedPercent=${loadedPercent}></conversation-meter>`;
-  }
-
-  private conversationDisplayTotal(): number {
-    if (!this.hasMore && this.messageStart === 0) return Math.max(1, this.messages.length);
-    return Math.max(1, this.messageTotal, this.messageStart + this.messages.length);
-  }
-
-  private conversationPositionPercent(total = this.conversationDisplayTotal()): number {
-    if (total <= 1) return 100;
-    const fallbackIndex = this.pinnedToBottom ? this.messageStart + this.messages.length - 1 : this.messageStart;
-    const index = clampNumber(this.currentConversationIndex ?? fallbackIndex, 0, total - 1);
-    return clampPercent((index / (total - 1)) * 100);
-  }
-
   private renderHistoryBoundary() {
     const range = this.historyRangeLabel();
     if (this.loadingMore) return html`<div class="history-boundary"><span>Loading earlier messages…</span>${range}</div>`;
@@ -827,13 +871,39 @@ export class ChatView extends LitElement {
   private renderMessage(message: ChatLine, index: number) {
     const toolOnly = this.isToolExecutionOnlyMessage(message);
     const askUserRecordOnly = this.isAskUserRecordOnlyMessage(message);
+    const conversational = !toolOnly && !askUserRecordOnly && (message.role === "user" || message.role === "assistant");
     const shellClass = toolOnly ? "msg tool-execution-shell" : "msg ask-user-record-shell";
+    const content = html`
+      <div class="conversation-content">
+        ${conversational ? null : this.renderMessageHeader(message, String(index))}
+        ${message.parts.map((part) => this.renderPart(part, message))}
+        ${conversational ? this.renderConversationFooter(message, String(index)) : null}
+      </div>
+    `;
     return html`
       ${this.renderScrollMarker(this.messageScrollMarkerId(index))}
-      <article class=${toolOnly || askUserRecordOnly ? shellClass : `msg ${message.role}`} data-index=${index} data-scroll-anchor-id=${this.messageAnchorKey(index)}>
-        ${toolOnly || askUserRecordOnly ? null : this.renderMessageHeader(message, String(index))}
-        ${message.parts.map((part) => this.renderPart(part, message))}
+      <article class=${toolOnly || askUserRecordOnly ? shellClass : `msg ${message.role}${conversational ? " conversation-message" : ""}`} data-index=${index} data-scroll-anchor-id=${this.messageAnchorKey(index)} aria-label=${conversational ? (message.role === "user" ? "Your message" : "Kite message") : undefined}>
+        ${conversational && message.role === "assistant" ? this.renderConversationAvatar("K", "Kite") : null}
+        ${content}
+        ${conversational && message.role === "user" ? this.renderConversationAvatar("A", "You") : null}
       </article>
+    `;
+  }
+
+  private renderConversationAvatar(initial: string, label: string) {
+    return html`<span class="message-avatar" title=${label} aria-hidden="true">${initial}</span>`;
+  }
+
+  private renderConversationFooter(message: ChatLine, key: string) {
+    const expanded = this.expandedMetaKey === key;
+    const meta = this.messageMetaLabel(message);
+    return html`
+      <div class="message-footer">
+        ${this.renderMessageActions(message, key)}
+        ${message.role === "user" ? html`
+          <span class=${expanded ? "msg-meta expanded" : "msg-meta"} role="button" tabindex="0" title=${meta} aria-label=${meta} aria-expanded=${String(expanded)} @click=${() => { this.expandedMetaKey = expanded ? undefined : key; }} @keydown=${(event: KeyboardEvent) => { this.onMetaKeydown(event, key, expanded); }}>${meta}</span>
+        ` : null}
+      </div>
     `;
   }
 
@@ -841,9 +911,12 @@ export class ChatView extends LitElement {
     const label = chatToolOutputLabel(toolName);
     return html`
       ${this.renderScrollMarker(this.messageScrollMarkerId(index))}
-      <article class="msg tool-image-output" data-index=${index} data-scroll-anchor-id=${this.messageAnchorKey(index)}>
-        ${this.renderMessageHeader(message, String(index), label)}
-        ${message.parts.map((part) => this.renderPart(part, message))}
+      <article class="msg tool-image-output" data-index=${index} data-scroll-anchor-id=${this.messageAnchorKey(index)} aria-label=${label}>
+        <header class="tool-output-header">
+          ${this.renderActivityMarks({ hasReasoning: false, hasTools: true })}
+          <span class="group-title">${label}</span>
+        </header>
+        <div class="tool-output-body">${message.parts.map((part) => this.renderPart(part, message))}</div>
       </article>
     `;
   }
@@ -857,32 +930,67 @@ export class ChatView extends LitElement {
   }
 
   private renderMessageGroup(messages: ChatLine[], startIndex: number, endIndex: number, defaultOpen: boolean) {
-    const disclosureKey = this.groupDisclosureKey(startIndex, endIndex, defaultOpen);
-    const open = this.disclosures.isOpen(disclosureKey, defaultOpen);
+    const thoughtTitle = chatThoughtTitle(messages);
+    const activityKinds = chatActivityKinds(messages);
+    const summary = html`
+      ${thoughtTitle === undefined
+        ? html`${this.renderActivityMarks(activityKinds)}<b class="label">${activityKinds.hasTools ? "Tools" : chatMessageGroupLabel(defaultOpen)}</b><span class="group-title">${summarizeChatGroup(messages)}</span>`
+        : html`${this.renderActivityMarks(activityKinds)}<span class="visually-hidden">Activity: </span><span class="thought-title">${thoughtTitle}</span>`}
+      ${this.renderGroupChevron()}
+    `;
+
+    if (defaultOpen) {
+      const expanded = this.expandedLiveGroupStartIndex === startIndex;
+      const projection = chatLiveActivityProjection(messages, startIndex, expanded);
+      return html`
+        ${this.renderScrollMarker(this.groupScrollMarkerId(endIndex))}
+        <section class=${`${chatMessageGroupClassName(true, thoughtTitle !== undefined)}${expanded ? " expanded" : ""}`} data-index=${startIndex} data-scroll-anchor-id=${this.groupAnchorKey(startIndex)} data-hidden-actions=${projection.hiddenCount} aria-live=${thoughtTitle === undefined ? "off" : "polite"}>
+          <button type="button" class="group-summary" aria-expanded=${String(expanded)} aria-label=${expanded ? "Show fewer actions" : `Show all ${String(messages.length)} actions`} @click=${() => { this.expandedLiveGroupStartIndex = expanded ? undefined : startIndex; }}>${summary}</button>
+          ${this.renderMessageGroupBody(projection.messages, projection.startIndex)}
+        </section>
+      `;
+    }
+
+    const disclosureKey = this.groupDisclosureKey(startIndex, endIndex, false);
+    const open = this.disclosures.isOpen(disclosureKey, false);
     return html`
       ${this.renderScrollMarker(this.groupScrollMarkerId(endIndex))}
-      <details class=${chatMessageGroupClassName(defaultOpen)} data-index=${startIndex} data-scroll-anchor-id=${this.groupAnchorKey(startIndex)} ?open=${open} @toggle=${(event: Event) => { this.onGroupToggle(disclosureKey, event, defaultOpen); }}>
-        <summary>
-          <b class="label">${chatMessageGroupLabel(defaultOpen)}</b>
-          <span>${summarizeChatGroup(messages)}</span>
-        </summary>
+      <details class=${chatMessageGroupClassName(false, thoughtTitle !== undefined)} data-index=${startIndex} data-scroll-anchor-id=${this.groupAnchorKey(startIndex)} aria-live="off" ?open=${open} @toggle=${(event: Event) => { this.onGroupToggle(disclosureKey, event, false); }}>
+        <summary>${summary}</summary>
         ${open ? this.renderMessageGroupBody(messages, startIndex) : null}
       </details>
+    `;
+  }
+
+  private renderGroupChevron() {
+    return html`
+      <svg class="group-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        <path d="m6 3 5 5-5 5"></path>
+      </svg>
+    `;
+  }
+
+  private renderActivityMarks(kinds: ChatActivityKinds) {
+    return html`
+      <span class="activity-marks" aria-hidden="true">
+        ${kinds.hasReasoning ? html`
+          <svg class="activity-mark reasoning-mark" viewBox="0 0 24 24" focusable="false">
+            <path d="M7 18h10a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.1 8.7 4.7 4.7 0 0 0 7 18Z"></path>
+          </svg>
+        ` : null}
+        ${!kinds.hasReasoning ? html`<span class="activity-mark event-mark">◇</span>` : null}
+      </span>
     `;
   }
 
   private renderMessageGroupBody(messages: ChatLine[], startIndex: number) {
     return html`
       <div class="group-body">
-        ${messages.map((message, offset) => {
-          const toolOnly = this.isToolExecutionOnlyMessage(message);
-          return html`
-            <section class=${toolOnly ? "group-msg tool-execution-shell" : `group-msg ${message.role}`} data-index=${startIndex + offset} data-scroll-anchor-id=${this.eventAnchorKey(startIndex + offset)}>
-              ${toolOnly ? null : this.renderMessageHeader(message, `${String(startIndex)}:${String(offset)}`)}
-              ${message.parts.map((part) => this.renderPart(part, message))}
-            </section>
-          `;
-        })}
+        ${messages.map((message, offset) => html`
+          <section class=${this.isToolExecutionOnlyMessage(message) ? "group-msg tool-execution-shell" : `group-msg ${message.role}`} data-index=${startIndex + offset} data-scroll-anchor-id=${this.eventAnchorKey(startIndex + offset)}>
+            ${message.parts.map((part) => this.renderPart(part, message))}
+          </section>
+        `)}
       </div>
     `;
   }
@@ -891,12 +999,18 @@ export class ChatView extends LitElement {
     return html`<span class="scroll-marker" data-marker-id=${markerId} aria-hidden="true"></span>`;
   }
 
-  private renderMessageHeader(message: ChatLine, key: string, label: string = message.role) {
+  private renderMessageHeader(message: ChatLine, key: string, label?: string) {
     const meta = this.messageMetaLabel(message);
     const expanded = this.expandedMetaKey === key;
+    const presentation = chatRolePresentation(message.role, this.projectIcon);
     return html`
-      <div class="msg-header">
-        <b class="label">${label}</b>
+      <div class=${message.role === "user" && label === undefined ? "msg-header user-message-header" : "msg-header"}>
+        ${message.role === "user" && label === undefined ? null : html`
+          <span class="role-heading">
+            <span class="role-glyph" aria-hidden="true">${presentation.glyph}</span>
+            <b class="label">${label ?? presentation.label}</b>
+          </span>
+        `}
         <div class="msg-header-trailing">
           ${this.renderMessageActions(message, key)}
           <span class=${expanded ? "msg-meta expanded" : "msg-meta"} role="button" tabindex="0" title=${meta} aria-label=${meta} aria-expanded=${String(expanded)} @click=${() => { this.expandedMetaKey = expanded ? undefined : key; }} @keydown=${(event: KeyboardEvent) => { this.onMetaKeydown(event, key, expanded); }}>${meta}</span>
@@ -911,7 +1025,12 @@ export class ChatView extends LitElement {
     return html`
       <div class="msg-actions" aria-label="Message actions">
         <button type="button" class="msg-action" title=${copied ? "Copied" : "Copy message"} aria-label=${`${copied ? "Copied" : "Copy"} ${message.role} message`} @click=${(event: MouseEvent) => { void this.copyMessage(message, key, event); }}>
-          <span aria-hidden="true">${copied ? "✓" : "⧉"}</span>
+          ${copied ? html`<span aria-hidden="true">✓</span>` : html`
+            <svg class="message-copy-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+              <path d="M5.5 4.5V3.25A1.25 1.25 0 0 1 6.75 2h6A1.25 1.25 0 0 1 14 3.25v6a1.25 1.25 0 0 1-1.25 1.25H11.5"></path>
+              <rect x="2" y="5.5" width="8.5" height="8.5" rx="1.25"></rect>
+            </svg>
+          `}
         </button>
       </div>
     `;
@@ -961,7 +1080,7 @@ export class ChatView extends LitElement {
   private renderPart(part: ChatPart, message?: ChatLine) {
     if (part.type === "text" && message?.role === "bash") return html`<pre class="part shell-output">${part.text}</pre>`;
     if (part.type === "text") return html`<formatted-text class="part" .text=${part.text}></formatted-text>`;
-    if (part.type === "thinking") return html`<details class="part"><summary>thinking</summary><formatted-text .text=${part.text}></formatted-text></details>`;
+    if (part.type === "thinking") return html`<div class="part thought-content"><formatted-text .text=${part.text}></formatted-text></div>`;
     if (part.type === "skillInvocation") return html`
       <details class="part skill-invocation">
         <summary><b>[skill]</b> ${part.name}</summary>
@@ -1006,7 +1125,6 @@ export class ChatView extends LitElement {
   private onScroll() {
     this.requestLoadMoreIfNeeded();
     this.updatePinnedToBottomFromScroll();
-    this.scheduleConversationRailUpdate();
     if (!this.suppressScrollSave) this.scheduleScrollPositionSave();
   }
 
@@ -1284,42 +1402,12 @@ export class ChatView extends LitElement {
     });
   }
 
-  private scheduleConversationRailUpdate(): void {
-    if (this.conversationRailFrame !== undefined) return;
-    this.conversationRailFrame = requestAnimationFrame(() => {
-      this.conversationRailFrame = undefined;
-      this.updateConversationRailPosition();
-    });
-  }
-
-  private updateConversationRailPosition(): void {
-    if (!this.messages.length || this.messageTotal <= 0) {
-      this.currentConversationIndex = undefined;
-      return;
-    }
-    const total = this.conversationDisplayTotal();
-    const article = this.firstVisibleArticle();
-    const index = Number(article?.dataset["index"]);
-    if (Number.isFinite(index)) {
-      this.currentConversationIndex = clampNumber(index, 0, Math.max(0, total - 1));
-      return;
-    }
-    this.currentConversationIndex = clampNumber(this.pinnedToBottom ? this.messageStart + this.messages.length - 1 : this.messageStart, 0, Math.max(0, total - 1));
-  }
-
   private scrollMarkers(): HTMLElement[] {
     return Array.from(this.renderRoot.querySelectorAll<HTMLElement>(".scroll-marker"));
   }
 
   private scrollMarkerAt(markerId: string): HTMLElement | undefined {
     return this.scrollMarkers().find((marker) => marker.dataset["markerId"] === markerId);
-  }
-
-  private firstVisibleArticle(): HTMLElement | undefined {
-    const chat = this.chat;
-    if (chat === undefined) return undefined;
-    const primaryArticles = Array.from(this.renderRoot.querySelectorAll<HTMLElement>("article.msg"));
-    return findFirstVisibleArticle(chat, primaryArticles) ?? findFirstVisibleArticle(chat, this.articles());
   }
 
   private articles(): HTMLElement[] {

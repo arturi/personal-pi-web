@@ -1,12 +1,12 @@
 {
-  "name": "PI WEB",
-  "short_name": "PI WEB",
-  "description": "Remote web UI and browser control plane for persistent Pi Coding Agent sessions.",
+  "name": "Dispatch",
+  "short_name": "Dispatch",
+  "description": "A chat-first personal console for Projects, Chats, and scheduled agent work.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#0d1117",
-  "theme_color": "#0d1117",
+  "background_color": "#0b0d0e",
+  "theme_color": "#0b0d0e",
   "icons": [
     {
       "src": "./pwa-icon-192.png",

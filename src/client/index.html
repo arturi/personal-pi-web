@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>PI WEB</title>
-    <meta name="theme-color" content="#0d1117" />
+    <title>Dispatch</title>
+    <meta name="theme-color" content="#0b0d0e" />
     <link rel="icon" type="image/svg+xml" href="%BASE_URL%favicon.svg" />
     <link rel="apple-touch-icon" href="%BASE_URL%apple-touch-icon.png" />
     <link rel="manifest" href="%BASE_URL%manifest.webmanifest" />
@@ -12,23 +12,27 @@
       :root {
         color-scheme: dark;
         --pi-control-font-size: 16px;
-        --pi-control-font-family: system-ui, sans-serif;
-        --pi-control-monospace-font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        --pi-bg: #0d1117;
-        --pi-surface: #161b22;
-        --pi-surface-hover: #21262d;
-        --pi-terminal-bg: #05070a;
-        --pi-terminal-text: #e6edf3;
-        --pi-border: #30363d;
-        --pi-border-muted: #21262d;
-        --pi-text: #e6edf3;
-        --pi-text-secondary: #c9d1d9;
-        --pi-text-bright: #f0f6fc;
-        --pi-muted: #8b949e;
-        --pi-dim: #6e7681;
-        --pi-accent: #58a6ff;
-        --pi-accent-border: #2f81f7;
-        --pi-selection-bg: #0d2847;
+        --pi-font-family: "Departure Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        --pi-content-font-family: "Commit Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        --pi-chrome-font-family: var(--pi-font-family);
+        --pi-control-font-family: var(--pi-font-family);
+        --pi-control-monospace-font-family: var(--pi-font-family);
+        --pi-bg: #0b0d0e;
+        --pi-surface: #151719;
+        --pi-surface-hover: #202326;
+        --pi-terminal-bg: #070808;
+        --pi-terminal-text: #eee8df;
+        --pi-border: #3a342f;
+        --pi-border-muted: #27231f;
+        --pi-text: #e7e1d8;
+        --pi-text-secondary: #c9c0b5;
+        --pi-text-bright: #fff8ed;
+        --pi-muted: #968b80;
+        --pi-dim: #746a61;
+        --pi-accent: #e07032;
+        --pi-accent-border: #a84b20;
+        --pi-info: #58a6d8;
+        --pi-selection-bg: #352116;
         --pi-success: #3fb950;
         --pi-success-border: #238636;
         --pi-success-bg: #0f1b12;
@@ -45,8 +49,8 @@
         --pi-shadow-soft: #0006;
         --pi-shadow: #0008;
         --pi-shadow-strong: #000b;
-        --pi-bg-overlay-soft: #0d1117dd;
-        --pi-bg-overlay: #0d1117e6;
+        --pi-bg-overlay-soft: #0b0d0edd;
+        --pi-bg-overlay: #0b0d0ee6;
         --pi-success-bg-overlay: #0f1b12ee;
         --pi-terminal-selection: #264f78;
       }

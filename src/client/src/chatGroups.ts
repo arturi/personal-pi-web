@@ -22,11 +22,12 @@ export function groupChatMessages(messages: ChatLine[], indexOffset = 0): ChatGr
 
   messages.forEach((message, index) => {
     const readableParts = message.parts.filter((part) => isReadablePart(message, part));
-    const technicalParts = message.parts.filter((part) => !isReadablePart(message, part));
+    const technicalParts = message.parts.filter((part) => part.type !== "thinking" && !isReadablePart(message, part));
+    const activityParts = message.parts.filter((part) => !isReadablePart(message, part));
 
     const absoluteIndex = indexOffset + index;
     const metadata = { ...(message.source === undefined ? {} : { source: message.source }), ...(message.meta === undefined ? {} : { meta: message.meta }) };
-    if (technicalParts.length) pushEvent({ role: message.role, parts: technicalParts, ...metadata }, absoluteIndex);
+    if (activityParts.length) pushEvent({ role: message.role, parts: activityParts, ...metadata }, absoluteIndex);
     if (readableParts.length) {
       flushEvents();
       const role = readableParts.every((part) => part.type === "skillRead") ? "skill" : message.role;

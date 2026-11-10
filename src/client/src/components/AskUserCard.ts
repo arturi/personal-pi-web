@@ -397,7 +397,7 @@ export class AskUserCard extends LitElement {
       width: 100%;
       margin: 0 0 14px;
       color: var(--pi-text);
-      font: 14px system-ui, sans-serif;
+      font: 14px var(--pi-font-family, system-ui, sans-serif);
       container-type: inline-size;
     }
     .card {
@@ -492,7 +492,7 @@ export class AskUserCard extends LitElement {
       background: var(--pi-bg);
       color: var(--pi-text);
       padding: 8px;
-      font: var(--pi-control-font-size, 16px)/1.4 var(--pi-control-font-family, system-ui, sans-serif);
+      font: var(--pi-control-font-size, 16px)/1.4 var(--pi-control-font-family, var(--pi-font-family, system-ui, sans-serif));
     }
     .form-footer {
       display: flex;

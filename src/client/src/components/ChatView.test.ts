@@ -9,15 +9,19 @@ import {
 import type { ChatLine } from "./shared";
 import {
   ChatView,
+  chatActivityKinds,
   chatEventAnchorKey,
   chatGroupAnchorKey,
   chatGroupScrollMarkerId,
+  chatLiveActivityProjection,
   chatMessageGroupClassName,
   chatMessageGroupLabel,
   chatMessageMetadataLabel,
+  chatRolePresentation,
   chatQueuedMessageSections,
   chatQueuedSectionShowsClearAction,
   chatSessionWarningRows,
+  chatThoughtTitle,
 } from "./ChatView";
 import { templateEventHandlerAfterMarker, templateEventHandlerNearMarker } from "../templateInspection.testSupport";
 
@@ -278,11 +282,49 @@ describe("chat event-group content seams", () => {
     expect(chatGroupScrollMarkerId(41)).toBe("g:41");
   });
 
-  it("distinguishes the live tail group by class and disclosure label", () => {
+  it("distinguishes live and Thought groups by class and disclosure label", () => {
     expect(chatMessageGroupClassName(true)).toBe("msg event-group live");
     expect(chatMessageGroupClassName(false)).toBe("msg event-group");
+    expect(chatMessageGroupClassName(true, true)).toBe("msg event-group live thought-group");
     expect(chatMessageGroupLabel(true)).toBe("live events");
     expect(chatMessageGroupLabel(false)).toBe("events");
+  });
+
+  it("derives semantic activity landmarks from reasoning and tool work", () => {
+    expect(chatActivityKinds([{ role: "assistant", parts: [{ type: "thinking", text: "plan" }] }])).toEqual({ hasReasoning: true, hasTools: false });
+    expect(chatActivityKinds([{ role: "assistant", parts: [{ type: "thinking", text: "plan" }, { type: "toolCall", toolName: "read", summary: "file" }] }])).toEqual({ hasReasoning: true, hasTools: true });
+    expect(chatActivityKinds([{ role: "tool", parts: [{ type: "toolExecution", toolName: "read", summary: "file", status: "success" }] }])).toEqual({ hasReasoning: false, hasTools: true });
+    expect(chatActivityKinds([{ role: "system", parts: [{ type: "text", text: "event" }] }])).toEqual({ hasReasoning: false, hasTools: false });
+  });
+
+  it("shows only the two latest live actions until explicitly expanded", () => {
+    const messages: ChatLine[] = [
+      { role: "assistant", parts: [{ type: "thinking", text: "one" }] },
+      { role: "assistant", parts: [{ type: "toolCall", toolName: "read", summary: "two" }] },
+      { role: "tool", parts: [{ type: "toolExecution", toolName: "read", summary: "three", status: "success" }] },
+      { role: "assistant", parts: [{ type: "thinking", text: "four" }] },
+    ];
+
+    expect(chatLiveActivityProjection(messages, 20, false)).toEqual({ messages: messages.slice(2), startIndex: 22, hiddenCount: 2 });
+    expect(chatLiveActivityProjection(messages, 20, true)).toEqual({ messages, startIndex: 20, hiddenCount: 0 });
+    expect(chatLiveActivityProjection(messages.slice(0, 1), 20, false)).toEqual({ messages: messages.slice(0, 1), startIndex: 20, hiddenCount: 0 });
+  });
+
+  it("derives a compact plain-text Thought title from streamed reasoning", () => {
+    expect(chatThoughtTitle([{ role: "assistant", parts: [{ type: "thinking", text: "  Planning   the project boundary. More detail follows." }] }])).toBe("Planning the project boundary.");
+    expect(chatThoughtTitle([{ role: "assistant", parts: [{ type: "thinking", text: "**Evaluating monospace fonts and licensing**\n\n**Searching for font assets**" }] }])).toBe("Evaluating monospace fonts and licensing");
+    expect(chatThoughtTitle([{ role: "assistant", parts: [{ type: "thinking", text: "## Checking `ChatView` and [tests](https://example.test)" }] }])).toBe("Checking ChatView and tests");
+    expect(chatThoughtTitle([{ role: "assistant", parts: [{ type: "thinking", text: "" }] }])).toBe("Working");
+    expect(chatThoughtTitle([{ role: "tool", parts: [{ type: "toolCall", toolName: "read", summary: "file" }] }])).toBeUndefined();
+  });
+});
+
+describe("chatRolePresentation", () => {
+  it("uses stable visual landmarks with visible role labels", () => {
+    expect(chatRolePresentation("user")).toEqual({ glyph: "›", label: "You" });
+    expect(chatRolePresentation("assistant", "🪐")).toEqual({ glyph: "🪐", label: "Assistant" });
+    expect(chatRolePresentation("tool")).toEqual({ glyph: "⌘", label: "Tool" });
+    expect(chatRolePresentation("system")).toEqual({ glyph: "i", label: "System" });
   });
 });
 

@@ -265,6 +265,7 @@ export type ThemeToken =
   | "--pi-dim"
   | "--pi-accent"
   | "--pi-accent-border"
+  | "--pi-info"
   | "--pi-selection-bg"
   | "--pi-success"
   | "--pi-success-border"

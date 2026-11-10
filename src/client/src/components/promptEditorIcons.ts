@@ -40,7 +40,7 @@ export function renderSteerIcon(): TemplateResult {
 
 export function renderStopIcon(): TemplateResult {
   return svg`
-    <svg class="prompt-action-icon prompt-action-icon-filled" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <svg class="prompt-action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
       <rect x="6.5" y="6.5" width="11" height="11" rx="2"></rect>
     </svg>
   `;

@@ -13,9 +13,23 @@ describe("groupChatMessages", () => {
     ];
 
     expect(groupChatMessages(messages, 10)).toEqual([
-      { kind: "group", startIndex: 10, endIndex: 10, messages: [messages[0]] },
+      { kind: "group", startIndex: 10, endIndex: 10, messages: [{ role: "assistant", parts: [{ type: "thinking", text: "plan" }, { type: "toolCall", toolName: "read", summary: "file" }] }] },
       { kind: "message", index: 11, message: text("assistant", "visible answer") },
       { kind: "group", startIndex: 12, endIndex: 12, messages: [messages[2]] },
+    ]);
+  });
+
+  it("combines adjacent Thought and tool activity into one group", () => {
+    const messages: ChatLine[] = [
+      { role: "assistant", parts: [{ type: "thinking", text: "inspect the current styles" }] },
+      { role: "assistant", parts: [{ type: "toolCall", toolName: "read", summary: "shared.ts" }] },
+      { role: "tool", parts: [{ type: "toolExecution", toolName: "read", summary: "shared.ts", status: "success" }] },
+      text("assistant", "visible answer"),
+    ];
+
+    expect(groupChatMessages(messages)).toEqual([
+      { kind: "group", startIndex: 0, endIndex: 2, messages: messages.slice(0, 3) },
+      { kind: "message", index: 3, message: messages[3] },
     ]);
   });
 

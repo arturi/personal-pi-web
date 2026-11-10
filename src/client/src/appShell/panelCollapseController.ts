@@ -3,7 +3,7 @@ import type { AppState } from "../appState";
 
 export class PanelCollapseController implements ReactiveController {
   navigationPanelCollapsed = false;
-  workspacePanelCollapsed = false;
+  workspacePanelCollapsed = true;
 
   hostConnected(): void {
     return;
@@ -32,6 +32,12 @@ export class PanelCollapseController implements ReactiveController {
   expandWorkspacePanel(): void {
     if (!this.workspacePanelCollapsed) return;
     this.workspacePanelCollapsed = false;
+    this.host.requestUpdate();
+  }
+
+  collapseWorkspacePanel(): void {
+    if (this.workspacePanelCollapsed) return;
+    this.workspacePanelCollapsed = true;
     this.host.requestUpdate();
   }
 

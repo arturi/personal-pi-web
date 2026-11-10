@@ -1,13 +1,14 @@
 // @vitest-environment happy-dom
 
 import { afterEach, describe, expect, it } from "vitest";
-import type { Machine, Project, Workspace } from "../../api";
+import type { Machine, Project, SessionInfo, Workspace } from "../../api";
 import type { MachineStatusSnapshot } from "../../../../shared/machineStatus";
 import { machineStatusSnapshot } from "../../machineStatus.testSupport";
 import { MachineList } from "../MachineList";
 import { MachineSwitcher } from "../MachineSwitcher";
 import { ProjectList } from "../ProjectList";
 import { WorkspaceList } from "../WorkspaceList";
+import { ProjectSessionNavigation } from "../personalOs/ProjectSessionNavigation";
 import { AppNavigationPanel, shouldShowMachinesSection } from "./AppNavigationPanel";
 
 afterEach(() => {
@@ -22,6 +23,36 @@ describe("shouldShowMachinesSection", () => {
 
   it("shows machine navigation when there are multiple machines", () => {
     expect(shouldShowMachinesSection([machine("local"), machine("remote-a")])).toBe(true);
+  });
+});
+
+describe("project and session shell seam", () => {
+  it("renders the primary project/session navigation and keeps runtime details behind the menu", async () => {
+    const panel = await mountPanel({}, machine("local"));
+    const selectedProject = panel.projects[0];
+    const selectedWorkspace = panel.workspaces[0];
+    if (selectedProject === undefined || selectedWorkspace === undefined) throw new Error("Expected project and workspace fixtures");
+    panel.selectedProject = selectedProject;
+    panel.selectedWorkspace = selectedWorkspace;
+    panel.projectSessionGroups = [{ workspace: selectedWorkspace, sessions: [session("session-1", selectedWorkspace)] }];
+    await panel.updateComplete;
+
+    const primary = section(panel, "project-session-navigation", ProjectSessionNavigation);
+    const runtime = panel.shadowRoot?.querySelector("details.runtime-browser");
+    if (!(runtime instanceof HTMLDetailsElement)) throw new Error("Expected runtime browser disclosure");
+    expect(primary.projects).toEqual(panel.projects);
+    expect(primary.groups).toEqual(panel.projectSessionGroups);
+    expect(runtime.open).toBe(false);
+
+    if (primary.shadowRoot === null) throw new Error("Expected project/session navigation shadow root");
+    const browse = [...primary.shadowRoot.querySelectorAll("button")]
+      .find((button) => button.textContent.includes("Runtime browser"));
+    if (!(browse instanceof HTMLButtonElement)) throw new Error("Expected Runtime browser button");
+    browse.click();
+    expect(runtime.open).toBe(true);
+
+    browse.click();
+    expect(runtime.open).toBe(false);
   });
 });
 
@@ -92,4 +123,16 @@ function project(id: string): Project {
 
 function workspace(id: string, projectId: string): Workspace {
   return { id, projectId, path: `/repo/${id}`, label: id, isMain: true, effectiveConfig: {} };
+}
+
+function session(id: string, targetWorkspace: Workspace): SessionInfo {
+  return {
+    id,
+    cwd: targetWorkspace.path,
+    path: `${targetWorkspace.path}/${id}.jsonl`,
+    created: "2026-06-04T00:00:00.000Z",
+    modified: "2026-06-04T00:00:00.000Z",
+    messageCount: 1,
+    firstMessage: "First message",
+  };
 }

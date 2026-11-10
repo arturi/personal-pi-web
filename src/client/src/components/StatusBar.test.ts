@@ -2,7 +2,15 @@ import type { TemplateResult } from "lit";
 import { describe, expect, it, vi } from "vitest";
 import type { SessionStatus } from "../api";
 import { templateEventHandlerAfterMarker } from "../templateInspection.testSupport";
-import { StatusBar, statusBarWarningControlContent } from "./StatusBar";
+import { StatusBar, statusBarContextLimit, statusBarWarningControlContent } from "./StatusBar";
+
+describe("statusBarContextLimit", () => {
+  it("shows the available context-window limit without token-flow or cost metrics", () => {
+    expect(statusBarContextLimit({ tokens: 96_000, contextWindow: 272_000, percent: 35.3 })).toBe("context 35.3% / 272k");
+    expect(statusBarContextLimit({ tokens: null, contextWindow: 272_000, percent: null })).toBe("context 272k");
+    expect(statusBarContextLimit(undefined)).toBeUndefined();
+  });
+});
 
 describe("statusBarWarningControlContent", () => {
   it("provides an action label for both states while keeping only the count visible", () => {
@@ -21,7 +29,7 @@ describe("statusBarWarningControlContent", () => {
   });
 });
 
-describe("StatusBar warning toggle wiring", () => {
+describe("StatusBar control wiring", () => {
   // Escape hatch: this specifically verifies the compact status-bar button's
   // Lit callback wiring in the node environment, anchored to its semantic class.
   it("invokes onToggleWarnings when the warning-count control is activated", () => {
@@ -35,6 +43,26 @@ describe("StatusBar warning toggle wiring", () => {
     templateEventHandlerAfterMarker(renderStatusBar(statusBar), "warning-toggle")(new Event("click"));
 
     expect(onToggleWarnings).toHaveBeenCalledOnce();
+  });
+
+  it("keeps model and reasoning selection interactive in the metrics bar", () => {
+    const statusBar = new StatusBar();
+    const onSelectModel = vi.fn();
+    const onSelectThinking = vi.fn();
+    statusBar.status = {
+      ...status(),
+      model: { provider: "provider", id: "model" },
+      thinkingLevel: "high",
+    };
+    statusBar.onSelectModel = onSelectModel;
+    statusBar.onSelectThinking = onSelectThinking;
+    const template = renderStatusBar(statusBar);
+
+    templateEventHandlerAfterMarker(template, "model-control")(new Event("click"));
+    templateEventHandlerAfterMarker(template, "reasoning-control")(new Event("click"));
+
+    expect(onSelectModel).toHaveBeenCalledOnce();
+    expect(onSelectThinking).toHaveBeenCalledOnce();
   });
 });
 
